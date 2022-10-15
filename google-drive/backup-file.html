@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backup To Google Drive</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            margin: 0px;
+            text-align: center;
+        }
+
+        .header {
+            background-color: rgb(224, 224, 224, 0.5);
+            padding: 0px 150px;
+            line-height: 80px;
+            height: 80px;
+            border-bottom: 1px solid rgb(224, 224, 224, 0.6);
+        }
+
+        .title {
+            font-weight: 700;
+            font-size: 30px;
+            float: left;
+            color: #3c84f8;
+        }
+
+        .auth-buttons {
+            float: right;
+        }
+
+        .signin,
+        .signout {
+            border: 0px;
+            padding: 10px 70px;
+            background-color: #3c84f8;
+            color: white;
+            outline: none;
+            font-family: 'Noto Sans KR', sans-serif;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .actions {
+            padding: 0px 300px;
+        }
+
+        textarea {
+            width: calc(100% - 40px);
+            height: 450px;
+            margin: 20px auto;
+            background-color: rgb(224, 224, 224, 0.2);
+            border: 2px solid rgb(224, 224, 224, 1);
+            outline: none;
+            padding: 10px 20px;
+            font-family: 'Noto Sans KR', sans-serif;
+            font-size: 18px;
+            box-shadow: rgba(100, 100, 111, 0.2) 0px 7px 29px 0px;
+        }
+
+        .upload {
+            border: 0px;
+            outline: none;
+            padding: 8px 30px;
+            display: block;
+            font-size: large;
+            border: 2px solid rgb(224, 224, 224, 1);
+            font-family: 'Noto Sans KR', sans-serif;
+            cursor: pointer;
+            float: right;
+            color: #3c84f8;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <div class="title">Backup To Google Drive</div>
+        <div class="auth-buttons">
+            <button class="signin">Sign In</button>
+            <button class="signout">Sign Out</button>
+        </div>
+    </div>
+    <div class="actions">
+        <textarea placeholder="Enter text here ..."></textarea>
+        <button class="upload" onclick="upload()">Backup</button>
+    </div>
+    <script>
+        // this source code used updated google sign in options 
+        // after the previous button is deprecated
+        window.onload = () => {
+            gapiLoaded();
+            gisLoaded()
+        }
+
+        var CLIENT_ID = '639609669934-eaescllh1k9fpp4nggtdoh1lc0p8kihh.apps.googleusercontent.com';
+        var API_KEY = 'AIzaSyAXs-Hb9cjDptjCqjS2ST5gd0_c7KbSvAM';
+        var DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
+        var SCOPES = 'https://www.googleapis.com/auth/drive';
+        var signinButton = document.getElementsByClassName('signin')[0];
+        var signoutButton = document.getElementsByClassName('signout')[0];
+        let tokenClient;
+        let gapiInited = false;
+        let gisInited = false;
+
+        function gapiLoaded() {
+            gapi.load('client', initializeGapiClient);
+        }
+
+        async function initializeGapiClient() {
+            await gapi.client.init({
+                apiKey: API_KEY,
+                discoveryDocs: DISCOVERY_DOCS,
+            });
+            gapiInited = true;
+            maybeEnableButtons();
+        }
+
+        function gisLoaded() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: ''
+            });
+            gisInited = true;
+            maybeEnableButtons();
+        }
+
+        function maybeEnableButtons() {
+            if (gapiInited && gisInited) {
+                signinButton.style.display = 'block'
+            }
+        }
+
+        signinButton.onclick = () => handleAuthClick()
+        function handleAuthClick() {
+            tokenClient.callback = async (resp) => {
+                if (resp.error !== undefined) {
+                    throw (resp);
+                }
+                signinButton.style.display = 'none'
+                signoutButton.style.display = 'block'
+                checkFolder()
+            };
+
+            if (gapi.client.getToken() === null) {
+                tokenClient.requestAccessToken({ prompt: 'consent' });
+            } else {
+                tokenClient.requestAccessToken({ prompt: '' });
+            }
+        }
+
+        signoutButton.onclick = () => handleSignoutClick()
+        function handleSignoutClick() {
+            const token = gapi.client.getToken();
+            if (token !== null) {
+                google.accounts.oauth2.revoke(token.access_token);
+                gapi.client.setToken('');
+                signinButton.style.display = 'block'
+                signoutButton.style.display = 'none'
+            }
+        }
+
+        // check for a Backup Folder in google drive
+        function checkFolder() {
+            gapi.client.drive.files.list({
+                'q': 'name = "Backup Folder"',
+            }).then(function (response) {
+                var files = response.result.files;
+                if (files && files.length > 0) {
+                    for (var i = 0; i < files.length; i++) {
+                        var file = files[i];
+                        localStorage.setItem('parent_folder', file.id);
+                        console.log('Folder Available');
+                    }
+                } else {
+                    // if folder not available then create
+                    createFolder();
+                }
+            })
+        }
+
+        // now create a function to upload file
+        function upload() {
+            var text = document.querySelector('textarea');
+            if (text.value != "") {
+                const blob = new Blob([text.value], { type: 'plain/text' });
+                // get parent folder id from localstorage
+                const parentFolder = localStorage.getItem('parent_folder');
+                // set file metadata
+                var metadata = {
+                    name: 'backup-file-' + String(Math.random() * 10000).split('.')[0] + '.txt',
+                    mimeType: 'plain/text',
+                    parents: [parentFolder]
+                };
+                var formData = new FormData();
+                formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                formData.append("file", blob);
+
+                fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+                    method: 'POST',
+                    headers: new Headers({ "Authorization": "Bearer " + gapi.auth.getToken().access_token }),
+                    body: formData
+                }).then(function (response) {
+                    return response.json();
+                }).then(function (value) {
+                    console.log(value)
+                });
+            }
+        }
+
+        function createFolder() {
+            var access_token = gapi.auth.getToken().access_token;
+            var request = gapi.client.request({
+                'path': 'drive/v2/files',
+                'method': 'POST',
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + access_token,
+                },
+                'body': {
+                    'title': 'Backup Folder',
+                    'mimeType': 'application/vnd.google-apps.folder'
+                }
+            });
+            request.execute(function (response) {
+                localStorage.setItem('parent_folder', response.id);
+            })
+        }
+    </script>
+    <script async defer src="https://apis.google.com/js/api.js"></script>
+    <script async defer src="https://accounts.google.com/gsi/client"></script>
+</body>
+
+</html>
